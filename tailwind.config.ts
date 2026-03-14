@@ -12,6 +12,15 @@ const config: Config = {
         background: "var(--background)",
         foreground: "var(--foreground)",
       },
+      keyframes: {
+        slideRight: {
+          '0%': { transform: 'translateX(0)', opacity: '1' },
+          '100%': { transform: 'translateX(32px)', opacity: '0' },
+        },
+      },
+      animation: {
+        'slide-right': 'slideRight 2s linear infinite',
+      },
     },
   },
   plugins: [],
