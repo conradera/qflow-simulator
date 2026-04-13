@@ -8,11 +8,27 @@ import type { Patient } from "../lib/queueEngine";
 /* ------------------------------------------------------------------ */
 
 interface PhoneSimulatorProps {
-  onJoinQueue: (serviceType: string, priority: string, channel: string) => Patient | null;
+  onJoinQueue: (
+    serviceType: string,
+    priority: string,
+    channel: string,
+    patientName: string,
+    contact: string,
+    visitReason: string
+  ) => Patient | null;
   onCheckPosition: (ticketNumber: string) => { position: number; estimatedWait: number } | null;
   onCancelBooking: (ticketNumber: string) => boolean;
   notifications: Array<{ id: string; message: string; time: string }>;
   queueStats: { totalWaiting: number };
+  smsMessages: Array<{
+    id: string;
+    from: "patient" | "admin" | "ai" | "system";
+    text: string;
+    time: string;
+    ticketNumber?: string;
+  }>;
+  isSmsReplying: boolean;
+  onSendSms: (text: string, ticketNumber?: string) => Promise<void>;
 }
 
 type ScreenMode = "home" | "ussd" | "sms";
@@ -23,6 +39,9 @@ type UssdStep =
   | "main-menu"
   | "select-service"
   | "select-priority"
+  | "enter-name"
+  | "enter-contact"
+  | "enter-reason"
   | "confirmation"
   | "check-position-input"
   | "check-position-result"
@@ -81,6 +100,9 @@ export default function PhoneSimulator({
   onCancelBooking,
   notifications,
   queueStats,
+  smsMessages,
+  isSmsReplying,
+  onSendSms,
 }: PhoneSimulatorProps) {
   const [mode, setMode] = useState<ScreenMode>("home");
   const [dialInput, setDialInput] = useState("");
@@ -88,6 +110,9 @@ export default function PhoneSimulator({
   const [ussdInput, setUssdInput] = useState("");
   const [selectedService, setSelectedService] = useState("");
   const [selectedPriority, setSelectedPriority] = useState("");
+  const [patientName, setPatientName] = useState("");
+  const [contact, setContact] = useState("");
+  const [visitReason, setVisitReason] = useState("");
   const [confirmationData, setConfirmationData] = useState<Patient | null>(null);
   const [positionData, setPositionData] = useState<{
     position: number;
@@ -97,6 +122,7 @@ export default function PhoneSimulator({
   const [ticketInput, setTicketInput] = useState("");
   const [ussdAnimating, setUssdAnimating] = useState(false);
   const [currentTime, setCurrentTime] = useState("");
+  const [smsInput, setSmsInput] = useState("");
   const smsEndRef = useRef<HTMLDivElement>(null);
 
   // Update clock
@@ -119,7 +145,14 @@ export default function PhoneSimulator({
   // Auto-scroll SMS
   useEffect(() => {
     smsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [notifications]);
+  }, [smsMessages, isSmsReplying]);
+
+  const handleSendSms = useCallback(async () => {
+    const text = smsInput.trim();
+    if (!text || isSmsReplying) return;
+    setSmsInput("");
+    await onSendSms(text);
+  }, [smsInput, isSmsReplying, onSendSms]);
 
   /* ---------- helpers ---------- */
 
@@ -128,6 +161,9 @@ export default function PhoneSimulator({
     setUssdInput("");
     setSelectedService("");
     setSelectedPriority("");
+    setPatientName("");
+    setContact("");
+    setVisitReason("");
     setConfirmationData(null);
     setPositionData(null);
     setCancelResult(null);
@@ -170,13 +206,38 @@ export default function PhoneSimulator({
           const idx = parseInt(option) - 1;
           if (idx >= 0 && idx < PRIORITIES.length) {
             setSelectedPriority(PRIORITIES[idx].key);
-            const patient = onJoinQueue(selectedService, PRIORITIES[idx].key, "USSD");
-            if (patient) {
-              setConfirmationData(patient);
-              showUssd("confirmation");
-            } else {
-              showUssd("error");
-            }
+            showUssd("enter-name");
+          }
+          break;
+        }
+        case "enter-name": {
+          if (!option.trim()) break;
+          setPatientName(option.trim());
+          showUssd("enter-contact");
+          break;
+        }
+        case "enter-contact": {
+          if (!option.trim()) break;
+          setContact(option.trim());
+          showUssd("enter-reason");
+          break;
+        }
+        case "enter-reason": {
+          if (!option.trim()) break;
+          setVisitReason(option.trim());
+          const patient = onJoinQueue(
+            selectedService,
+            selectedPriority,
+            "USSD",
+            patientName || "Unknown",
+            contact || "N/A",
+            option.trim()
+          );
+          if (patient) {
+            setConfirmationData(patient);
+            showUssd("confirmation");
+          } else {
+            showUssd("error");
           }
           break;
         }
@@ -199,7 +260,7 @@ export default function PhoneSimulator({
       }
       setUssdInput("");
     },
-    [ussdStep, onJoinQueue, onCheckPosition, onCancelBooking, selectedService, showUssd]
+    [ussdStep, onJoinQueue, onCheckPosition, onCancelBooking, selectedService, selectedPriority, patientName, contact, showUssd]
   );
 
   /* ---------- USSD content ---------- */
@@ -228,6 +289,27 @@ export default function PhoneSimulator({
           body: "Select Priority:\n\n1. Normal\n2. Elderly (60+)\n3. Pregnant Mother\n4. Person with Disability\n5. Child (Under 5)",
           hasInput: true,
           inputPlaceholder: "Enter option",
+        };
+      case "enter-name":
+        return {
+          title: "USSD Service",
+          body: "Enter patient full name:",
+          hasInput: true,
+          inputPlaceholder: "Full name",
+        };
+      case "enter-contact":
+        return {
+          title: "USSD Service",
+          body: "Enter patient contact (phone number):",
+          hasInput: true,
+          inputPlaceholder: "+2567XXXXXXXX",
+        };
+      case "enter-reason":
+        return {
+          title: "USSD Service",
+          body: "Enter reason for visit:",
+          hasInput: true,
+          inputPlaceholder: "Reason",
         };
       case "confirmation": {
         const svc = SERVICES.find((s) => s.key === selectedService);
@@ -485,26 +567,61 @@ export default function PhoneSimulator({
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-        {notifications.length === 0 ? (
+        {smsMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-white/25 text-xs">
             <svg className="w-12 h-12 mb-3 opacity-20" fill="none" stroke="currentColor" strokeWidth={1} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
             <p className="font-medium">No messages yet</p>
-            <p className="text-[10px] mt-1 text-white/15">Join a queue to receive notifications</p>
+            <p className="text-[10px] mt-1 text-white/15">Join a queue or send a message below</p>
           </div>
         ) : (
-          notifications.map((notif) => (
-            <div key={notif.id} className="flex flex-col animate-fadeIn">
-              {/* iOS-style message bubble (grey = received) */}
-              <div className="max-w-[82%] self-start bg-[#2c2c2e] rounded-[18px] rounded-bl-[4px] px-3.5 py-2.5">
-                <p className="text-white text-[13px] leading-[1.35]">{notif.message}</p>
+          smsMessages.map((msg) => (
+            <div key={msg.id} className={`flex flex-col animate-fadeIn ${msg.from === "patient" ? "items-end" : "items-start"}`}>
+              <div
+                className={`max-w-[82%] px-3.5 py-2.5 rounded-[18px] ${
+                  msg.from === "patient"
+                    ? "bg-[#34C759] text-black rounded-br-[4px]"
+                    : "bg-[#2c2c2e] text-white rounded-bl-[4px]"
+                }`}
+              >
+                <p className="text-[13px] leading-[1.35]">{msg.text}</p>
               </div>
-              <span className="text-white/20 text-[9px] mt-1 ml-2">{notif.time}</span>
+              <span className="text-white/20 text-[9px] mt-1 mx-2">{msg.time}</span>
             </div>
           ))
         )}
+        {isSmsReplying && (
+          <div className="flex flex-col animate-fadeIn items-start">
+            <div className="max-w-[82%] self-start bg-[#2c2c2e] rounded-[18px] rounded-bl-[4px] px-3.5 py-2.5">
+              <p className="text-white/70 text-[13px] leading-[1.35]">Typing...</p>
+            </div>
+          </div>
+        )}
         <div ref={smsEndRef} />
+      </div>
+
+      {/* Composer */}
+      <div className="flex-shrink-0 px-3 py-2 bg-[#1c1c1e]/95 backdrop-blur-xl border-t border-white/10">
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={smsInput}
+            onChange={(e) => setSmsInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSendSms();
+            }}
+            placeholder="Type message..."
+            className="flex-1 bg-[#2c2c2e] border border-white/10 rounded-full px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-[#34C759]/50"
+          />
+          <button
+            onClick={() => void handleSendSms()}
+            disabled={!smsInput.trim() || isSmsReplying}
+            className="px-3 py-2 rounded-full bg-[#34C759] text-black text-xs font-semibold disabled:opacity-40"
+          >
+            Send
+          </button>
+        </div>
       </div>
     </div>
   );

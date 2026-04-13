@@ -1,5 +1,17 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+**QFlow Simulator** — Smart Virtual Queue Management System (Mukono Health Centre IV). Uses Supabase for persistence and OpenRouter (free models) for AI wait-time estimates.
+
+## Setup (Supabase + OpenRouter)
+
+1. Copy `.env.local.example` to `.env.local` and set:
+   - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` from your [Supabase](https://supabase.com) project.
+   - `OPENROUTER_API_KEY` from [OpenRouter](https://openrouter.ai) (for AI wait-time estimate).
+
+2. Apply the database schema: in the Supabase dashboard, open **SQL Editor** and run the SQL in `supabase/migrations/20250314000000_initial_schema.sql`. Alternatively, use the Supabase CLI: `supabase db push`.
+
+Without these env vars, the app still runs: queue state is in-memory only and the AI estimate section will show an error.
+
 ## Getting Started
 
 First, run the development server:

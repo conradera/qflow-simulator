@@ -24,6 +24,7 @@ export interface Patient {
   id: string;
   name: string;
   phone: string;
+  visitReason?: string;
   ticketNumber: string;
   priority: PatientPriority;
   priorityReason?: PriorityReason;
@@ -121,51 +122,8 @@ export interface QueueState {
 export type UpdateCallback = (state: QueueState) => void;
 
 // -----------------------------------------------------------------------------
-// Data: Ugandan Names & Constants
+// Service & queue constants
 // -----------------------------------------------------------------------------
-
-const UGANDAN_FIRST_NAMES = [
-  'Aisha', 'Amina', 'Brian', 'Catherine', 'David', 'Diana', 'Emmanuel',
-  'Esther', 'Frank', 'Grace', 'Hassan', 'Irene', 'James', 'Joy',
-  'Kenneth', 'Lilian', 'Moses', 'Nabukenya', 'Oscar', 'Patricia',
-  'Richard', 'Sarah', 'Timothy', 'Vivian', 'William', 'Zaina',
-  'Angella', 'Bashir', 'Charity', 'Dennis', 'Edith', 'Fred',
-  'Goretti', 'Henry', 'Immaculate', 'Joseph', 'Kato', 'Lukia',
-  'Martin', 'Nambooze', 'Oliver', 'Peace', 'Robert', 'Sylvia',
-  'Tom', 'Umar', 'Viola', 'Yusuf', 'Agnes', 'Benson',
-  'Claire', 'Derrick', 'Eunice', 'Geofrey', 'Hope', 'Isaac',
-  'Juliet', 'Kevin', 'Lydia', 'Mark', 'Nakato', 'Paul',
-  'Rebecca', 'Simon', 'Tracy', 'Vincent', 'Winnie', 'Xavier',
-];
-
-const UGANDAN_LAST_NAMES = [
-  'Nakamya', 'Ssempijja', 'Babirye', 'Kizza', 'Lubega', 'Mugisha',
-  'Nalubega', 'Okello', 'Tumwine', 'Wasswa', 'Atwine', 'Birungi',
-  'Ddamulira', 'Kabugo', 'Mubiru', 'Nabatanzi', 'Opio', 'Sserunjogi',
-  'Tusiime', 'Wandera', 'Akello', 'Batte', 'Chebet', 'Drazu',
-  'Kamya', 'Laker', 'Mutesi', 'Nankya', 'Ojok', 'Sekandi',
-  'Tenywa', 'Wamala', 'Amongi', 'Bogere', 'Kiiza', 'Lule',
-  'Mwesigwa', 'Nansubuga', 'Opolot', 'Ssebaggala', 'Tibagwa', 'Were',
-  'Atim', 'Bwire', 'Kagoda', 'Lwanga', 'Muwanga', 'Nassaka',
-  'Otim', 'Ssekitoleko', 'Tukahirwa', 'Waiswa',
-];
-
-const STAFF_NAMES: Record<ServiceType, string[]> = {
-  'opd-triage': ['Nurse Nambi Rose', 'Nurse Katende John', 'Nurse Apio Grace'],
-  'consultation': [
-    'Dr. Mukasa Peter',
-    'Dr. Achieng Sarah',
-    'Dr. Bbosa Martin',
-    'Dr. Nanteza Claire',
-  ],
-  'pharmacy': ['Pharm. Ssali David', 'Pharm. Akoth Mercy', 'Pharm. Wabwire Tom'],
-  'laboratory': [
-    'Lab. Tech. Ouma Fred',
-    'Lab. Tech. Nakimuli Irene',
-    'Lab. Tech. Byaruhanga Paul',
-  ],
-  'cashier': ['Kasule Brian', 'Nalwanga Esther'],
-};
 
 const SERVICE_NAMES: Record<ServiceType, string> = {
   'opd-triage': 'OPD Triage',
@@ -334,14 +292,13 @@ function buildServicePoints(
   const points: ServicePoint[] = [];
   for (const type of SERVICE_TYPES) {
     const count = counts[type];
-    const names = STAFF_NAMES[type];
     for (let i = 0; i < count; i++) {
       points.push({
         id: `sp-${type}-${i + 1}`,
         name: `${SERVICE_NAMES[type]} ${i + 1}`,
         type,
         status: 'active',
-        staffName: names[i % names.length],
+        staffName: '',
         patientsServed: 0,
         avgServiceTime: DEFAULT_SERVICE_TIMES[type],
       });
@@ -358,7 +315,7 @@ export const SCENARIOS: Record<ScenarioName, Scenario> = {
       'A typical day at Mukono Health Centre IV with steady patient flow.',
     config: {
       speed: 1,
-      autoGenerate: true,
+      autoGenerate: false,
       patientsPerMinute: 0.5,
       avgServiceTime: 300,
       priorityRatio: 0.15,
@@ -373,7 +330,7 @@ export const SCENARIOS: Record<ScenarioName, Scenario> = {
     description: 'Monday morning rush - highest patient volume of the week.',
     config: {
       speed: 1,
-      autoGenerate: true,
+      autoGenerate: false,
       patientsPerMinute: 2,
       avgServiceTime: 250,
       priorityRatio: 0.2,
@@ -389,7 +346,7 @@ export const SCENARIOS: Record<ScenarioName, Scenario> = {
       'Special vaccination outreach day. High volume of children and mothers.',
     config: {
       speed: 1,
-      autoGenerate: true,
+      autoGenerate: false,
       patientsPerMinute: 3,
       avgServiceTime: 180,
       priorityRatio: 0.6,
@@ -408,7 +365,7 @@ export const SCENARIOS: Record<ScenarioName, Scenario> = {
     description: 'Reduced staffing day - longer wait times expected.',
     config: {
       speed: 1,
-      autoGenerate: true,
+      autoGenerate: false,
       patientsPerMinute: 0.8,
       avgServiceTime: 400,
       priorityRatio: 0.15,
@@ -485,11 +442,41 @@ export class QueueSimulator {
       patientsServed: 0,
     }));
     this.patients = [];
-    this.ticketCounter = 0;
+    // Keep ticketCounter so we never reuse ticket numbers (avoids DB unique constraint)
     this.simulationTime = 0;
     this.metricsHistory = [];
     this.ussdSessions.clear();
     this.autoGenAccumulator = 0;
+    this.emitUpdate();
+  }
+
+  /**
+   * Load state from persisted data (e.g. Supabase).
+   * Replaces patients and service points and restores simulation time / ticket counter.
+   */
+  loadPersistedState(data: {
+    patients: Patient[];
+    servicePoints: ServicePoint[];
+    simulationTime: number;
+    ticketCounter: number;
+  }): void {
+    this.pause();
+    this.patients = data.patients.map((p) => ({ ...p }));
+    const patientById = new Map(this.patients.map((p) => [p.id, p]));
+    this.servicePoints = data.servicePoints.map((sp) => {
+      const currentPatient = sp.currentPatient?.id
+        ? patientById.get(sp.currentPatient.id)
+        : undefined;
+      return {
+        ...sp,
+        currentPatient,
+      };
+    });
+    this.simulationTime = data.simulationTime;
+    this.ticketCounter = data.ticketCounter;
+    for (const st of SERVICE_TYPES) {
+      this.recalculatePositions(st);
+    }
     this.emitUpdate();
   }
 
@@ -514,6 +501,11 @@ export class QueueSimulator {
     this.config.speed = speed;
   }
 
+  /** Set ticket counter (e.g. from DB max) so next ticket is counter+1. */
+  setTicketCounter(n: number): void {
+    this.ticketCounter = Math.max(0, Math.floor(n));
+  }
+
   // ---- patient management --------------------------------------------------
 
   /** Manually add a patient to the queue. Returns the created patient. */
@@ -530,9 +522,10 @@ export class QueueSimulator {
       (priority !== 'normal' ? this.rollPriorityReason() : undefined);
 
     const patient: Patient = {
-      id: generateId(),
-      name: overrides?.name ?? this.generateName(),
+      id: ticketNumber,
+      name: overrides?.name ?? ticketNumber,
       phone: overrides?.phone ?? generateUgandanPhone(),
+      visitReason: overrides?.visitReason ?? undefined,
       ticketNumber,
       priority,
       priorityReason,
@@ -995,12 +988,6 @@ export class QueueSimulator {
     if (this.onUpdate) {
       this.onUpdate(this.getState());
     }
-  }
-
-  private generateName(): string {
-    return `${randomChoice(UGANDAN_FIRST_NAMES)} ${randomChoice(
-      UGANDAN_LAST_NAMES
-    )}`;
   }
 
   private rollPriority(): PatientPriority {

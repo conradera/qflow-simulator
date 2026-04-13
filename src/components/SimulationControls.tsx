@@ -1,6 +1,16 @@
 "use client";
 
-import React, { useCallback } from "react";
+import React, { useCallback, useState } from "react";
+
+export interface ManualPatientInput {
+  name: string;
+  contact: string;
+  visitReason: string;
+  serviceType: "opd-triage" | "consultation" | "pharmacy" | "laboratory" | "cashier";
+  priority: "normal" | "high" | "urgent";
+  priorityReason?: "elderly" | "pregnant" | "pwd" | "child";
+  channel: "ussd" | "sms" | "app" | "walk-in";
+}
 
 export interface SimulationConfig {
   autoGenerate: boolean;
@@ -19,7 +29,7 @@ export interface SimulationControlsProps {
   onReset: () => void;
   onSpeedChange: (speed: number) => void;
   onConfigChange: (config: Partial<SimulationConfig>) => void;
-  onAddPatient: () => void;
+  onAddPatient: (input: ManualPatientInput) => void;
   onLoadScenario: (scenario: string) => void;
 }
 
@@ -44,12 +54,35 @@ export default function SimulationControls({
   onAddPatient,
   onLoadScenario,
 }: SimulationControlsProps) {
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [form, setForm] = useState<ManualPatientInput>({
+    name: "",
+    contact: "",
+    visitReason: "",
+    serviceType: "opd-triage",
+    priority: "normal",
+    priorityReason: undefined,
+    channel: "walk-in",
+  });
+
   const handleSliderChange = useCallback(
     (field: keyof SimulationConfig) => (e: React.ChangeEvent<HTMLInputElement>) => {
       onConfigChange({ [field]: parseFloat(e.target.value) });
     },
     [onConfigChange]
   );
+
+  const resetForm = useCallback(() => {
+    setForm({
+      name: "",
+      contact: "",
+      visitReason: "",
+      serviceType: "opd-triage",
+      priority: "normal",
+      priorityReason: undefined,
+      channel: "walk-in",
+    });
+  }, []);
 
   return (
     <div className="w-[300px] bg-gray-50 text-gray-800 p-4 flex flex-col gap-4 overflow-y-auto h-full text-sm">
@@ -168,7 +201,7 @@ export default function SimulationControls({
 
         {/* Manual Add */}
         <button
-          onClick={onAddPatient}
+          onClick={() => setShowAddModal(true)}
           className="mt-2 w-full py-1.5 rounded-md text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
         >
           + Add Patient Manually
@@ -253,6 +286,117 @@ export default function SimulationControls({
           ))}
         </div>
       </div>
+
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-xl border border-gray-200 shadow-xl p-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Add Patient</h3>
+            <div className="grid grid-cols-1 gap-2">
+              <input
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Patient name"
+                className="px-3 py-2 rounded border border-gray-300 text-sm"
+              />
+              <input
+                value={form.contact}
+                onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))}
+                placeholder="Contact (phone)"
+                className="px-3 py-2 rounded border border-gray-300 text-sm"
+              />
+              <input
+                value={form.visitReason}
+                onChange={(e) => setForm((f) => ({ ...f, visitReason: e.target.value }))}
+                placeholder="Visit reason"
+                className="px-3 py-2 rounded border border-gray-300 text-sm"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={form.serviceType}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, serviceType: e.target.value as ManualPatientInput["serviceType"] }))
+                  }
+                  className="px-3 py-2 rounded border border-gray-300 text-sm bg-white"
+                >
+                  <option value="opd-triage">OPD Triage</option>
+                  <option value="consultation">Consultation</option>
+                  <option value="pharmacy">Pharmacy</option>
+                  <option value="laboratory">Laboratory</option>
+                  <option value="cashier">Cashier</option>
+                </select>
+                <select
+                  value={form.channel}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, channel: e.target.value as ManualPatientInput["channel"] }))
+                  }
+                  className="px-3 py-2 rounded border border-gray-300 text-sm bg-white"
+                >
+                  <option value="walk-in">Walk-in</option>
+                  <option value="ussd">USSD</option>
+                  <option value="sms">SMS</option>
+                  <option value="app">App</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={form.priority}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, priority: e.target.value as ManualPatientInput["priority"] }))
+                  }
+                  className="px-3 py-2 rounded border border-gray-300 text-sm bg-white"
+                >
+                  <option value="normal">Normal</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+                <select
+                  value={form.priorityReason ?? ""}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      priorityReason: (e.target.value || undefined) as ManualPatientInput["priorityReason"],
+                    }))
+                  }
+                  className="px-3 py-2 rounded border border-gray-300 text-sm bg-white"
+                >
+                  <option value="">No priority reason</option>
+                  <option value="elderly">Elderly</option>
+                  <option value="pregnant">Pregnant</option>
+                  <option value="pwd">PWD</option>
+                  <option value="child">Child</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => {
+                  setShowAddModal(false);
+                  resetForm();
+                }}
+                className="px-3 py-2 rounded bg-gray-100 text-gray-700 text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (!form.name.trim() || !form.contact.trim() || !form.visitReason.trim()) return;
+                  onAddPatient({
+                    ...form,
+                    name: form.name.trim(),
+                    contact: form.contact.trim(),
+                    visitReason: form.visitReason.trim(),
+                  });
+                  setShowAddModal(false);
+                  resetForm();
+                }}
+                className="px-3 py-2 rounded bg-emerald-600 text-white text-sm font-semibold"
+              >
+                Add Patient
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

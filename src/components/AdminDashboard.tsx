@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -53,6 +53,15 @@ interface AdminDashboardProps {
   onCallNext: (servicePointId: string) => void;
   onToggleServicePoint: (servicePointId: string) => void;
   onMarkNoShow: (patientId: string) => void;
+  onCompleteService: (patientId: string) => void;
+  chatMessages: Array<{
+    id: string;
+    from: 'patient' | 'admin' | 'ai' | 'system';
+    text: string;
+    time: string;
+    ticketNumber?: string;
+  }>;
+  onAdminChatSend: (text: string, ticketNumber?: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +109,12 @@ export default function AdminDashboard({
   onCallNext,
   onToggleServicePoint,
   onMarkNoShow,
+  onCompleteService,
+  chatMessages,
+  onAdminChatSend,
 }: AdminDashboardProps) {
+  const [adminReply, setAdminReply] = useState('');
+  const [targetTicket, setTargetTicket] = useState('');
   // ---- derived data -------------------------------------------------------
 
   const activePatients = useMemo(
@@ -108,6 +122,11 @@ export default function AdminDashboard({
       patients.filter(
         (p) => p.status === 'waiting' || p.status === 'serving'
       ),
+    [patients]
+  );
+
+  const tickets = useMemo(
+    () => Array.from(new Set(patients.map((p) => p.ticketNumber))).sort(),
     [patients]
   );
 
@@ -445,7 +464,9 @@ export default function AdminDashboard({
                     <td className="px-4 py-2 text-gray-900 font-mono font-medium">
                       {patient.ticketNumber}
                     </td>
-                    <td className="px-4 py-2 text-gray-900">{patient.name}</td>
+                    <td className="px-4 py-2 text-gray-700">
+                      {patient.name && patient.name.trim() ? patient.name : ''}
+                    </td>
                     <td className="px-4 py-2 text-gray-600">
                       {formatServiceLabel(patient.serviceType)}
                     </td>
@@ -487,6 +508,14 @@ export default function AdminDashboard({
                             No Show
                           </button>
                         )}
+                        {patient.status === 'serving' && (
+                          <button
+                            onClick={() => onCompleteService(patient.id)}
+                            className="px-2 py-1 text-xs font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                          >
+                            Complete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -517,7 +546,6 @@ export default function AdminDashboard({
                 <div className="flex items-start justify-between mb-2">
                   <div>
                     <h3 className="text-gray-900 font-medium text-sm">{sp.name}</h3>
-                    <p className="text-gray-500 text-xs">{sp.staffName}</p>
                   </div>
                   <span
                     className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${statusBadge[sp.status]}`}
@@ -529,10 +557,7 @@ export default function AdminDashboard({
                 {sp.currentPatient ? (
                   <div className="mt-2 bg-blue-50 border border-blue-100 rounded p-2">
                     <p className="text-xs text-gray-500">Current Patient</p>
-                    <p className="text-sm text-gray-900 font-medium">
-                      {sp.currentPatient.name}
-                    </p>
-                    <p className="text-xs text-gray-500 font-mono">
+                    <p className="text-sm text-gray-900 font-mono font-medium">
                       {sp.currentPatient.ticketNumber}
                     </p>
                   </div>
@@ -560,6 +585,70 @@ export default function AdminDashboard({
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* ================================================================= */}
+      {/* 5. PATIENT CHATS                                                  */}
+      {/* ================================================================= */}
+      <div className="bg-white border border-gray-200 shadow-sm rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-gray-900 font-semibold text-sm">Patient Chats</h2>
+          <span className="text-xs text-gray-500">{chatMessages.length} messages</span>
+        </div>
+        <div className="h-64 overflow-y-auto bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
+          {chatMessages.length === 0 ? (
+            <p className="text-xs text-gray-400">No chat messages yet.</p>
+          ) : (
+            chatMessages.map((m) => (
+              <div
+                key={m.id}
+                className={`max-w-[85%] px-3 py-2 rounded-lg text-xs ${
+                  m.from === 'patient'
+                    ? 'bg-emerald-100 text-emerald-900'
+                    : m.from === 'admin'
+                      ? 'bg-blue-100 text-blue-900 ml-auto'
+                      : 'bg-gray-200 text-gray-800'
+                }`}
+              >
+                <p className="font-medium mb-0.5">
+                  {m.from.toUpperCase()} {m.ticketNumber ? `• ${m.ticketNumber}` : ''}
+                </p>
+                <p>{m.text}</p>
+                <p className="text-[10px] opacity-70 mt-1">{m.time}</p>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <select
+            value={targetTicket}
+            onChange={(e) => setTargetTicket(e.target.value)}
+            className="px-2 py-2 rounded border border-gray-300 text-xs text-gray-700 bg-white"
+          >
+            <option value="">General</option>
+            {tickets.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+          <input
+            value={adminReply}
+            onChange={(e) => setAdminReply(e.target.value)}
+            placeholder="Reply to patient..."
+            className="flex-1 min-w-[220px] px-3 py-2 rounded border border-gray-300 text-xs text-gray-900"
+          />
+          <button
+            onClick={() => {
+              if (!adminReply.trim()) return;
+              onAdminChatSend(adminReply.trim(), targetTicket || undefined);
+              setAdminReply('');
+            }}
+            className="px-3 py-2 rounded bg-blue-600 text-white text-xs font-medium hover:bg-blue-700"
+          >
+            Send
+          </button>
         </div>
       </div>
 
