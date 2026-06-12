@@ -16,6 +16,13 @@ import {
 } from 'chart.js';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
 import type { Patient, ServicePoint, QueueMetrics } from '../lib/queueEngine';
+import {
+  CARE_STATUS_LABELS,
+  CARE_STATUS_STYLES,
+  getPatientCareStatus,
+} from '../lib/patientStatus';
+import { validateSmsMessage, formatUgandaPhoneDisplay } from '../lib/validation';
+import Link from 'next/link';
 
 ChartJS.register(
   CategoryScale,
@@ -62,6 +69,8 @@ interface AdminDashboardProps {
     ticketNumber?: string;
   }>;
   onAdminChatSend: (text: string, ticketNumber?: string) => void;
+  liveMode?: boolean;
+  recentPatientIds?: Set<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,8 +121,11 @@ export default function AdminDashboard({
   onCompleteService,
   chatMessages,
   onAdminChatSend,
+  liveMode = false,
+  recentPatientIds = new Set(),
 }: AdminDashboardProps) {
   const [adminReply, setAdminReply] = useState('');
+  const [adminReplyError, setAdminReplyError] = useState('');
   const [targetTicket, setTargetTicket] = useState('');
   // ---- derived data -------------------------------------------------------
 
@@ -297,7 +309,13 @@ export default function AdminDashboard({
   // ---- render -------------------------------------------------------------
 
   return (
-    <div className="min-h-screen bg-white p-4 md:p-6 space-y-6">
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6 space-y-6">
+      {liveMode && (
+        <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          Live queue — updates sync instantly across all screens
+        </div>
+      )}
       {/* ================================================================= */}
       {/* 1. TOP STATS BAR                                                  */}
       {/* ================================================================= */}
@@ -416,6 +434,46 @@ export default function AdminDashboard({
       </div>
 
       {/* ================================================================= */}
+      {/* 2b. WAITING AREA MANAGEMENT                                       */}
+      {/* ================================================================= */}
+      <div className="bg-white border border-gray-200 shadow-sm rounded-lg p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-gray-900 font-semibold text-sm">Waiting Area Management</h2>
+          <Link
+            href="/display"
+            target="_blank"
+            className="text-xs px-3 py-1.5 rounded bg-slate-800 text-white hover:bg-slate-700"
+          >
+            Open Display Screen
+          </Link>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+            <p className="text-xs text-green-700 font-medium">Normal</p>
+            <p className="text-2xl font-bold text-green-900">
+              {activePatients.filter((p) => getPatientCareStatus(p) === 'normal').length}
+            </p>
+          </div>
+          <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3">
+            <p className="text-xs text-yellow-700 font-medium">Attention Required</p>
+            <p className="text-2xl font-bold text-yellow-900">
+              {activePatients.filter((p) => getPatientCareStatus(p) === 'attention').length}
+            </p>
+          </div>
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+            <p className="text-xs text-red-700 font-medium">Emergency / Critical</p>
+            <p className="text-2xl font-bold text-red-900">
+              {activePatients.filter((p) => getPatientCareStatus(p) === 'emergency').length}
+            </p>
+          </div>
+        </div>
+        <p className="text-xs text-gray-500">
+          Status colours: Green (Normal), Yellow (Attention Required), Red (Emergency/Critical).
+          Special cases — elderly, pregnant, PWD, children, and emergencies — are prioritised in queue order.
+        </p>
+      </div>
+
+      {/* ================================================================= */}
       {/* 3. LIVE QUEUE TABLE                                               */}
       {/* ================================================================= */}
       <div className="bg-white border border-gray-200 shadow-sm rounded-lg overflow-hidden">
@@ -428,10 +486,11 @@ export default function AdminDashboard({
               <tr className="bg-gray-50 text-left">
                 <th className="px-4 py-2 text-gray-500 font-medium">Ticket #</th>
                 <th className="px-4 py-2 text-gray-500 font-medium">Name</th>
+                <th className="px-4 py-2 text-gray-500 font-medium">Telephone</th>
                 <th className="px-4 py-2 text-gray-500 font-medium">Service</th>
-                <th className="px-4 py-2 text-gray-500 font-medium">Priority</th>
+                <th className="px-4 py-2 text-gray-500 font-medium">Care Status</th>
+                <th className="px-4 py-2 text-gray-500 font-medium">Queue Status</th>
                 <th className="px-4 py-2 text-gray-500 font-medium">Wait Time</th>
-                <th className="px-4 py-2 text-gray-500 font-medium">Status</th>
                 <th className="px-4 py-2 text-gray-500 font-medium">Channel</th>
                 <th className="px-4 py-2 text-gray-500 font-medium">Actions</th>
               </tr>
@@ -439,17 +498,13 @@ export default function AdminDashboard({
             <tbody>
               {activePatients.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
                     No patients in queue
                   </td>
                 </tr>
               )}
               {activePatients.map((patient) => {
-                const priorityStyles: Record<string, string> = {
-                  urgent: 'bg-red-500 text-white',
-                  high: 'bg-orange-500 text-white',
-                  normal: 'bg-blue-500 text-white',
-                };
+                const careStatus = getPatientCareStatus(patient);
                 const statusStyles: Record<string, string> = {
                   waiting: 'text-amber-700 bg-amber-50',
                   serving: 'text-green-700 bg-green-50',
@@ -459,7 +514,9 @@ export default function AdminDashboard({
                 return (
                   <tr
                     key={patient.id}
-                    className="border-t border-gray-200 hover:bg-gray-50 transition-colors"
+                    className={`border-t border-gray-200 hover:bg-gray-50 transition-all duration-500 ${
+                      recentPatientIds.has(patient.id) ? 'bg-emerald-50 ring-1 ring-emerald-200' : ''
+                    }`}
                   >
                     <td className="px-4 py-2 text-gray-900 font-mono font-medium">
                       {patient.ticketNumber}
@@ -467,18 +524,18 @@ export default function AdminDashboard({
                     <td className="px-4 py-2 text-gray-700">
                       {patient.name && patient.name.trim() ? patient.name : ''}
                     </td>
+                    <td className="px-4 py-2 text-gray-600 font-mono text-xs">
+                      {formatUgandaPhoneDisplay(patient.telephone ?? patient.phone)}
+                    </td>
                     <td className="px-4 py-2 text-gray-600">
                       {formatServiceLabel(patient.serviceType)}
                     </td>
                     <td className="px-4 py-2">
                       <span
-                        className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${priorityStyles[patient.priority]}`}
+                        className={`inline-block px-2 py-0.5 rounded text-xs font-medium border ${CARE_STATUS_STYLES[careStatus]}`}
                       >
-                        {patient.priority}
+                        {CARE_STATUS_LABELS[careStatus]}
                       </span>
-                    </td>
-                    <td className="px-4 py-2 text-gray-600">
-                      {formatWait(patient.estimatedWait)}
                     </td>
                     <td className="px-4 py-2">
                       <span
@@ -486,6 +543,9 @@ export default function AdminDashboard({
                       >
                         {patient.status}
                       </span>
+                    </td>
+                    <td className="px-4 py-2 text-gray-600">
+                      {formatWait(patient.estimatedWait)}
                     </td>
                     <td className="px-4 py-2 text-gray-600 capitalize">
                       {patient.channel}
@@ -641,7 +701,12 @@ export default function AdminDashboard({
           />
           <button
             onClick={() => {
-              if (!adminReply.trim()) return;
+              const err = validateSmsMessage(adminReply);
+              if (err) {
+                setAdminReplyError(err);
+                return;
+              }
+              setAdminReplyError('');
               onAdminChatSend(adminReply.trim(), targetTicket || undefined);
               setAdminReply('');
             }}
@@ -650,6 +715,9 @@ export default function AdminDashboard({
             Send
           </button>
         </div>
+        {adminReplyError && (
+          <p className="text-xs text-red-600 mt-1">{adminReplyError}</p>
+        )}
       </div>
 
       {/* ================================================================= */}

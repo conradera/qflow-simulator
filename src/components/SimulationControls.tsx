@@ -1,14 +1,20 @@
 "use client";
 
 import React, { useCallback, useState } from "react";
+import {
+  validatePatientJoinInput,
+  normalizeUgandaPhone,
+  DEFAULT_SIMULATOR_PHONE,
+} from "../lib/validation";
+import UgandaPhoneInput from "./UgandaPhoneInput";
 
 export interface ManualPatientInput {
   name: string;
-  contact: string;
+  telephone: string;
   visitReason: string;
   serviceType: "opd-triage" | "consultation" | "pharmacy" | "laboratory" | "cashier";
   priority: "normal" | "high" | "urgent";
-  priorityReason?: "elderly" | "pregnant" | "pwd" | "child";
+  priorityReason?: "elderly" | "pregnant" | "pwd" | "child" | "emergency";
   channel: "ussd" | "sms" | "app" | "walk-in";
 }
 
@@ -55,9 +61,20 @@ export default function SimulationControls({
   onLoadScenario,
 }: SimulationControlsProps) {
   const [showAddModal, setShowAddModal] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState<ManualPatientInput>({
     name: "",
-    contact: "",
+    telephone: DEFAULT_SIMULATOR_PHONE,
+    visitReason: "",
+    serviceType: "opd-triage",
+    priority: "normal",
+    priorityReason: undefined,
+    channel: "walk-in",
+  });
+
+  const defaultForm = (): ManualPatientInput => ({
+    name: "",
+    telephone: DEFAULT_SIMULATOR_PHONE,
     visitReason: "",
     serviceType: "opd-triage",
     priority: "normal",
@@ -73,16 +90,34 @@ export default function SimulationControls({
   );
 
   const resetForm = useCallback(() => {
-    setForm({
-      name: "",
-      contact: "",
-      visitReason: "",
-      serviceType: "opd-triage",
-      priority: "normal",
-      priorityReason: undefined,
-      channel: "walk-in",
-    });
+    setFormErrors({});
+    setForm(defaultForm());
   }, []);
+
+  const handleSubmitPatient = useCallback(() => {
+    const telephone = normalizeUgandaPhone(form.telephone);
+    const result = validatePatientJoinInput({
+      name: form.name,
+      telephone,
+      visitReason: form.visitReason,
+      serviceType: form.serviceType,
+      priority: form.priority,
+      priorityReason: form.priorityReason,
+      channel: form.channel,
+    });
+    if (!result.valid) {
+      setFormErrors(result.errors);
+      return;
+    }
+    onAddPatient({
+      ...form,
+      name: form.name.trim(),
+      telephone,
+      visitReason: form.visitReason.trim(),
+    });
+    setShowAddModal(false);
+    resetForm();
+  }, [form, onAddPatient, resetForm]);
 
   return (
     <div className="w-[300px] bg-gray-50 text-gray-800 p-4 flex flex-col gap-4 overflow-y-auto h-full text-sm">
@@ -292,24 +327,31 @@ export default function SimulationControls({
           <div className="w-full max-w-md bg-white rounded-xl border border-gray-200 shadow-xl p-4">
             <h3 className="text-sm font-semibold text-gray-900 mb-3">Add Patient</h3>
             <div className="grid grid-cols-1 gap-2">
-              <input
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="Patient name"
-                className="px-3 py-2 rounded border border-gray-300 text-sm"
-              />
-              <input
-                value={form.contact}
-                onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))}
-                placeholder="Contact (phone)"
-                className="px-3 py-2 rounded border border-gray-300 text-sm"
-              />
-              <input
-                value={form.visitReason}
-                onChange={(e) => setForm((f) => ({ ...f, visitReason: e.target.value }))}
-                placeholder="Visit reason"
-                className="px-3 py-2 rounded border border-gray-300 text-sm"
-              />
+              <div>
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Patient name"
+                  className={`w-full px-3 py-2 rounded border text-sm ${formErrors.name ? "border-red-400" : "border-gray-300"}`}
+                />
+                {formErrors.name && <p className="text-xs text-red-600 mt-0.5">{formErrors.name}</p>}
+              </div>
+              <div>
+                <UgandaPhoneInput
+                  value={form.telephone}
+                  onChange={(telephone) => setForm((f) => ({ ...f, telephone }))}
+                  error={formErrors.telephone}
+                />
+              </div>
+              <div>
+                <input
+                  value={form.visitReason}
+                  onChange={(e) => setForm((f) => ({ ...f, visitReason: e.target.value }))}
+                  placeholder="Visit reason"
+                  className={`w-full px-3 py-2 rounded border text-sm ${formErrors.visitReason ? "border-red-400" : "border-gray-300"}`}
+                />
+                {formErrors.visitReason && <p className="text-xs text-red-600 mt-0.5">{formErrors.visitReason}</p>}
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <select
                   value={form.serviceType}
@@ -364,6 +406,7 @@ export default function SimulationControls({
                   <option value="pregnant">Pregnant</option>
                   <option value="pwd">PWD</option>
                   <option value="child">Child</option>
+                  <option value="emergency">Emergency</option>
                 </select>
               </div>
             </div>
@@ -378,17 +421,7 @@ export default function SimulationControls({
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  if (!form.name.trim() || !form.contact.trim() || !form.visitReason.trim()) return;
-                  onAddPatient({
-                    ...form,
-                    name: form.name.trim(),
-                    contact: form.contact.trim(),
-                    visitReason: form.visitReason.trim(),
-                  });
-                  setShowAddModal(false);
-                  resetForm();
-                }}
+                onClick={handleSubmitPatient}
                 className="px-3 py-2 rounded bg-emerald-600 text-white text-sm font-semibold"
               >
                 Add Patient

@@ -18,6 +18,7 @@ import type {
   NotificationTypeDb,
   PatientChannelDb,
 } from './database.types';
+import { normalizeUgandaPhone } from './validation';
 
 // ---------------------------------------------------------------------------
 // Patient: engine <-> DB
@@ -30,14 +31,17 @@ function toDbChannel(ch: string): PatientChannelDb {
 }
 
 export function patientToRow(p: Patient, servicePointId?: string | null): Omit<PatientRow, 'created_at' | 'updated_at'> {
+  const telephone = normalizeUgandaPhone(p.telephone ?? p.phone);
   return {
     id: p.id,
     name: p.name,
-    phone: p.phone,
+    phone: telephone,
+    telephone,
     visit_reason: p.visitReason ?? null,
     ticket_number: p.ticketNumber,
     priority: p.priority,
     priority_reason: p.priorityReason ?? null,
+    care_status: p.careStatus ?? 'normal',
     status: p.status,
     service_type: p.serviceType,
     service_point_id: servicePointId ?? null,
@@ -54,14 +58,17 @@ export function patientToRow(p: Patient, servicePointId?: string | null): Omit<P
 }
 
 export function rowToPatient(r: PatientRow): Patient {
+  const telephone = normalizeUgandaPhone(r.telephone ?? r.phone);
   return {
     id: r.id,
     name: r.name,
-    phone: r.phone,
+    phone: telephone,
+    telephone,
     visitReason: r.visit_reason ?? undefined,
     ticketNumber: r.ticket_number,
     priority: r.priority,
-    priorityReason: r.priority_reason as 'elderly' | 'pregnant' | 'pwd' | 'child' | undefined,
+    priorityReason: r.priority_reason as 'elderly' | 'pregnant' | 'pwd' | 'child' | 'emergency' | undefined,
+    careStatus: r.care_status ?? 'normal',
     status: r.status,
     serviceType: r.service_type,
     joinedAt: r.sim_joined_at_sec ?? 0,

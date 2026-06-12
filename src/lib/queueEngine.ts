@@ -3,6 +3,8 @@
 // Mukono Health Centre IV, Uganda
 // =============================================================================
 
+import { normalizeUgandaPhone } from './validation';
+
 // -----------------------------------------------------------------------------
 // Types & Interfaces
 // -----------------------------------------------------------------------------
@@ -17,17 +19,20 @@ export type ServiceType =
 export type PatientPriority = 'normal' | 'high' | 'urgent';
 export type PatientStatus = 'waiting' | 'serving' | 'completed' | 'no-show';
 export type PatientChannel = 'ussd' | 'sms' | 'app' | 'walk-in';
-export type PriorityReason = 'elderly' | 'pregnant' | 'pwd' | 'child';
+export type PriorityReason = 'elderly' | 'pregnant' | 'pwd' | 'child' | 'emergency';
+export type CareStatus = 'normal' | 'attention' | 'emergency';
 export type ServicePointStatus = 'active' | 'inactive' | 'break';
 
 export interface Patient {
   id: string;
   name: string;
   phone: string;
+  telephone: string;
   visitReason?: string;
   ticketNumber: string;
   priority: PatientPriority;
   priorityReason?: PriorityReason;
+  careStatus: CareStatus;
   status: PatientStatus;
   serviceType: ServiceType;
   joinedAt: number;
@@ -174,15 +179,33 @@ function weightedChoice<T>(items: T[], weights: number[]): T {
   return items[items.length - 1];
 }
 
+function deriveCareStatus(
+  priority: PatientPriority,
+  priorityReason?: PriorityReason
+): CareStatus {
+  if (
+    priority === 'urgent' ||
+    priorityReason === 'emergency' ||
+    priorityReason === 'child'
+  ) {
+    return 'emergency';
+  }
+  if (
+    priority === 'high' ||
+    priorityReason === 'elderly' ||
+    priorityReason === 'pregnant' ||
+    priorityReason === 'pwd'
+  ) {
+    return 'attention';
+  }
+  return 'normal';
+}
+
 function generateUgandanPhone(): string {
   const prefixes = ['70', '71', '72', '74', '75', '76', '77', '78', '79'];
   const prefix = randomChoice(prefixes);
   const number = String(randomInt(1000000, 9999999));
   return `+256${prefix}${number}`;
-}
-
-function generateId(): string {
-  return `p-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 }
 
 function generateSessionId(): string {
@@ -521,14 +544,23 @@ export class QueueSimulator {
       overrides?.priorityReason ??
       (priority !== 'normal' ? this.rollPriorityReason() : undefined);
 
+    const phone = normalizeUgandaPhone(
+      overrides?.phone ?? overrides?.telephone ?? generateUgandanPhone()
+    );
+    const telephone = normalizeUgandaPhone(overrides?.telephone ?? phone);
+    const careStatus =
+      overrides?.careStatus ?? deriveCareStatus(priority, priorityReason);
+
     const patient: Patient = {
       id: ticketNumber,
       name: overrides?.name ?? ticketNumber,
-      phone: overrides?.phone ?? generateUgandanPhone(),
+      phone,
+      telephone,
       visitReason: overrides?.visitReason ?? undefined,
       ticketNumber,
       priority,
       priorityReason,
+      careStatus,
       status: 'waiting',
       serviceType,
       joinedAt: this.simulationTime,
@@ -582,6 +614,21 @@ export class QueueSimulator {
     sp.currentPatient = undefined;
 
     this.recalculatePositions(sp.type);
+    this.emitUpdate();
+    return patient;
+  }
+
+  /** Complete a serving patient by id (with or without a linked service point). */
+  completePatient(patientId: string): Patient | null {
+    const sp = this.servicePoints.find((s) => s.currentPatient?.id === patientId);
+    if (sp) return this.completeService(sp.id);
+
+    const patient = this.patients.find((p) => p.id === patientId && p.status === 'serving');
+    if (!patient) return null;
+
+    patient.status = 'completed';
+    patient.completedAt = this.simulationTime;
+    this.recalculatePositions(patient.serviceType);
     this.emitUpdate();
     return patient;
   }
@@ -1003,6 +1050,7 @@ export class QueueSimulator {
       'pregnant',
       'pwd',
       'child',
+      'emergency',
     ]);
   }
 }

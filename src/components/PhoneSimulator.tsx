@@ -1,7 +1,19 @@
 "use client";
 
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import type { Patient } from "../lib/queueEngine";
+import {
+  validatePatientName,
+  validateTelephone,
+  validateVisitReason,
+  validateTicketNumber,
+  validateUssdMenuOption,
+  validateSmsMessage,
+  sanitizePhoneInput,
+  normalizeUgandaPhone,
+  DEFAULT_SIMULATOR_PHONE,
+} from "../lib/validation";
+import QrTicket from "./QrTicket";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -15,9 +27,9 @@ interface PhoneSimulatorProps {
     patientName: string,
     contact: string,
     visitReason: string
-  ) => Patient | null;
+  ) => Patient | null | Promise<Patient | null>;
   onCheckPosition: (ticketNumber: string) => { position: number; estimatedWait: number } | null;
-  onCancelBooking: (ticketNumber: string) => boolean;
+  onCancelBooking: (ticketNumber: string) => boolean | Promise<boolean>;
   notifications: Array<{ id: string; message: string; time: string }>;
   queueStats: { totalWaiting: number };
   smsMessages: Array<{
@@ -68,6 +80,7 @@ const PRIORITIES = [
   { key: "pregnant", label: "Pregnant Mother" },
   { key: "disability", label: "Person with Disability" },
   { key: "child", label: "Child (Under 5)" },
+  { key: "emergency", label: "Emergency / Critical" },
 ];
 
 const DIALPAD_KEYS = [
@@ -111,8 +124,7 @@ export default function PhoneSimulator({
   const [selectedService, setSelectedService] = useState("");
   const [selectedPriority, setSelectedPriority] = useState("");
   const [patientName, setPatientName] = useState("");
-  const [contact, setContact] = useState("");
-  const [visitReason, setVisitReason] = useState("");
+  const [contact, setContact] = useState(DEFAULT_SIMULATOR_PHONE);
   const [confirmationData, setConfirmationData] = useState<Patient | null>(null);
   const [positionData, setPositionData] = useState<{
     position: number;
@@ -123,7 +135,12 @@ export default function PhoneSimulator({
   const [ussdAnimating, setUssdAnimating] = useState(false);
   const [currentTime, setCurrentTime] = useState("");
   const [smsInput, setSmsInput] = useState("");
+  const [ussdError, setUssdError] = useState("");
   const smsEndRef = useRef<HTMLDivElement>(null);
+  const phoneSmsMessages = useMemo(
+    () => smsMessages.filter((m) => m.from !== "admin"),
+    [smsMessages]
+  );
 
   // Update clock
   useEffect(() => {
@@ -145,14 +162,18 @@ export default function PhoneSimulator({
   // Auto-scroll SMS
   useEffect(() => {
     smsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [smsMessages, isSmsReplying]);
+  }, [phoneSmsMessages, isSmsReplying]);
 
   const handleSendSms = useCallback(async () => {
     const text = smsInput.trim();
-    if (!text || isSmsReplying) return;
+    const err = validateSmsMessage(text);
+    if (err || isSmsReplying) return;
     setSmsInput("");
-    await onSendSms(text);
-  }, [smsInput, isSmsReplying, onSendSms]);
+    const ticketHint =
+      confirmationData?.ticketNumber ??
+      [...phoneSmsMessages].reverse().find((m) => m.ticketNumber)?.ticketNumber;
+    await onSendSms(text, ticketHint);
+  }, [smsInput, isSmsReplying, onSendSms, confirmationData, phoneSmsMessages]);
 
   /* ---------- helpers ---------- */
 
@@ -162,15 +183,16 @@ export default function PhoneSimulator({
     setSelectedService("");
     setSelectedPriority("");
     setPatientName("");
-    setContact("");
-    setVisitReason("");
+    setContact(DEFAULT_SIMULATOR_PHONE);
     setConfirmationData(null);
     setPositionData(null);
     setCancelResult(null);
     setTicketInput("");
+    setUssdError("");
   }, []);
 
   const showUssd = useCallback((step: UssdStep) => {
+    setUssdError("");
     setUssdAnimating(true);
     setTimeout(() => {
       setUssdStep(step);
@@ -187,72 +209,91 @@ export default function PhoneSimulator({
 
   const handleUssdOption = useCallback(
     (option: string) => {
+      setUssdError("");
       switch (ussdStep) {
-        case "main-menu":
+        case "main-menu": {
+          const err = validateUssdMenuOption(option, 4);
+          if (err) { setUssdError(err); break; }
           if (option === "1") showUssd("select-service");
           else if (option === "2") showUssd("check-position-input");
           else if (option === "3") showUssd("cancel-input");
           else if (option === "4") showUssd("view-services");
           break;
+        }
         case "select-service": {
+          const err = validateUssdMenuOption(option, SERVICES.length);
+          if (err) { setUssdError(err); break; }
           const idx = parseInt(option) - 1;
-          if (idx >= 0 && idx < SERVICES.length) {
-            setSelectedService(SERVICES[idx].key);
-            showUssd("select-priority");
-          }
+          setSelectedService(SERVICES[idx].key);
+          showUssd("select-priority");
           break;
         }
         case "select-priority": {
+          const err = validateUssdMenuOption(option, PRIORITIES.length);
+          if (err) { setUssdError(err); break; }
           const idx = parseInt(option) - 1;
-          if (idx >= 0 && idx < PRIORITIES.length) {
-            setSelectedPriority(PRIORITIES[idx].key);
-            showUssd("enter-name");
-          }
+          setSelectedPriority(PRIORITIES[idx].key);
+          showUssd("enter-name");
           break;
         }
         case "enter-name": {
-          if (!option.trim()) break;
+          const err = validatePatientName(option);
+          if (err) { setUssdError(err); break; }
           setPatientName(option.trim());
+          setUssdInput(DEFAULT_SIMULATOR_PHONE);
           showUssd("enter-contact");
           break;
         }
         case "enter-contact": {
-          if (!option.trim()) break;
-          setContact(option.trim());
+          const normalized = normalizeUgandaPhone(option.trim());
+          const err = validateTelephone(normalized);
+          if (err) { setUssdError(err); break; }
+          setContact(normalized);
           showUssd("enter-reason");
           break;
         }
         case "enter-reason": {
-          if (!option.trim()) break;
-          setVisitReason(option.trim());
-          const patient = onJoinQueue(
-            selectedService,
-            selectedPriority,
-            "USSD",
-            patientName || "Unknown",
-            contact || "N/A",
-            option.trim()
-          );
-          if (patient) {
-            setConfirmationData(patient);
-            showUssd("confirmation");
-          } else {
-            showUssd("error");
-          }
+          const err = validateVisitReason(option);
+          if (err) { setUssdError(err); break; }
+          void Promise.resolve(
+            onJoinQueue(
+              selectedService,
+              selectedPriority,
+              "USSD",
+              patientName,
+              contact,
+              option.trim()
+            )
+          ).then((patient) => {
+            if (patient) {
+              setConfirmationData(patient);
+              showUssd("confirmation");
+            } else {
+              setUssdError("Could not join queue. Check your details and try again.");
+              showUssd("error");
+            }
+          });
           break;
         }
         case "check-position-input": {
-          const result = onCheckPosition(option.toUpperCase());
+          const ticket = option.trim().toUpperCase();
+          const err = validateTicketNumber(ticket);
+          if (err) { setUssdError(err); break; }
+          const result = onCheckPosition(ticket);
           setPositionData(result);
-          setTicketInput(option.toUpperCase());
+          setTicketInput(ticket);
           showUssd("check-position-result");
           break;
         }
         case "cancel-input": {
-          const success = onCancelBooking(option.toUpperCase());
-          setCancelResult(success);
-          setTicketInput(option.toUpperCase());
-          showUssd("cancel-result");
+          const ticket = option.trim().toUpperCase();
+          const err = validateTicketNumber(ticket);
+          if (err) { setUssdError(err); break; }
+          void Promise.resolve(onCancelBooking(ticket)).then((success) => {
+            setCancelResult(success);
+            setTicketInput(ticket);
+            showUssd("cancel-result");
+          });
           break;
         }
         default:
@@ -286,7 +327,7 @@ export default function PhoneSimulator({
       case "select-priority":
         return {
           title: "USSD Service",
-          body: "Select Priority:\n\n1. Normal\n2. Elderly (60+)\n3. Pregnant Mother\n4. Person with Disability\n5. Child (Under 5)",
+          body: "Select Priority:\n\n1. Normal\n2. Elderly (60+)\n3. Pregnant Mother\n4. Person with Disability\n5. Child (Under 5)\n6. Emergency / Critical",
           hasInput: true,
           inputPlaceholder: "Enter option",
         };
@@ -300,9 +341,9 @@ export default function PhoneSimulator({
       case "enter-contact":
         return {
           title: "USSD Service",
-          body: "Enter patient contact (phone number):",
+          body: `Enter telephone number:\n(Default: ${DEFAULT_SIMULATOR_PHONE})`,
           hasInput: true,
-          inputPlaceholder: "+2567XXXXXXXX",
+          inputPlaceholder: DEFAULT_SIMULATOR_PHONE,
         };
       case "enter-reason":
         return {
@@ -369,7 +410,7 @@ export default function PhoneSimulator({
       case "error":
         return {
           title: "USSD Service",
-          body: "An error occurred. Please try again.",
+          body: ussdError || "An error occurred. Please try again.",
           hasInput: false,
           inputPlaceholder: "",
         };
@@ -468,6 +509,7 @@ export default function PhoneSimulator({
               <span className="text-white/60 text-xs">Patients in queue</span>
               <span className="text-white text-lg font-bold">{queueStats.totalWaiting}</span>
             </div>
+            <p className="text-white/40 text-[10px] mt-2 font-mono">{DEFAULT_SIMULATOR_PHONE}</p>
           </div>
         </div>
 
@@ -559,15 +601,15 @@ export default function PhoneSimulator({
             <span className="text-white text-xs font-bold">Q</span>
           </div>
           <div>
-            <h3 className="text-white text-sm font-semibold">QFlow</h3>
-            <p className="text-white/40 text-[10px]">Notifications</p>
+            <h3 className="text-white text-sm font-semibold">QFlow AI</h3>
+            <p className="text-white/40 text-[10px]">SMS Assistant</p>
           </div>
         </div>
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-        {smsMessages.length === 0 ? (
+        {phoneSmsMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-white/25 text-xs">
             <svg className="w-12 h-12 mb-3 opacity-20" fill="none" stroke="currentColor" strokeWidth={1} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -576,13 +618,18 @@ export default function PhoneSimulator({
             <p className="text-[10px] mt-1 text-white/15">Join a queue or send a message below</p>
           </div>
         ) : (
-          smsMessages.map((msg) => (
+          phoneSmsMessages.map((msg) => (
             <div key={msg.id} className={`flex flex-col animate-fadeIn ${msg.from === "patient" ? "items-end" : "items-start"}`}>
+              {msg.from === "ai" && (
+                <span className="text-[9px] text-emerald-400/70 mb-0.5 mx-2">QFlow AI</span>
+              )}
               <div
                 className={`max-w-[82%] px-3.5 py-2.5 rounded-[18px] ${
                   msg.from === "patient"
                     ? "bg-[#34C759] text-black rounded-br-[4px]"
-                    : "bg-[#2c2c2e] text-white rounded-bl-[4px]"
+                    : msg.from === "ai"
+                      ? "bg-[#1a3a2a] text-white border border-emerald-500/30 rounded-bl-[4px]"
+                      : "bg-[#2c2c2e] text-white rounded-bl-[4px]"
                 }`}
               >
                 <p className="text-[13px] leading-[1.35]">{msg.text}</p>
@@ -658,11 +705,28 @@ export default function PhoneSimulator({
                 <p className="text-white/60 text-sm">Connecting...</p>
               </div>
             ) : (
-              <pre className="text-white/80 text-[13px] leading-[1.55] font-sans whitespace-pre-wrap text-center">
-                {content.body}
-              </pre>
+              <>
+                <pre className="text-white/80 text-[13px] leading-[1.55] font-sans whitespace-pre-wrap text-center">
+                  {content.body}
+                </pre>
+                {ussdStep === "confirmation" && confirmationData && (
+                  <div className="mt-4 flex justify-center">
+                    <div className="bg-white rounded-lg p-3">
+                      <QrTicket
+                        ticketNumber={confirmationData.ticketNumber}
+                        patientName={patientName}
+                        size={100}
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
+
+          {ussdError && content.hasInput && (
+            <p className="px-5 pb-2 text-red-400 text-xs text-center">{ussdError}</p>
+          )}
 
           {/* Input + buttons */}
           {!isConnecting && (
@@ -670,9 +734,16 @@ export default function PhoneSimulator({
               {content.hasInput && (
                 <div className="px-5 pb-3">
                   <input
-                    type="text"
+                    type={ussdStep === "enter-contact" ? "tel" : "text"}
+                    inputMode={ussdStep === "enter-contact" ? "tel" : undefined}
                     value={ussdInput}
-                    onChange={(e) => setUssdInput(e.target.value)}
+                    onChange={(e) =>
+                      setUssdInput(
+                        ussdStep === "enter-contact"
+                          ? sanitizePhoneInput(e.target.value)
+                          : e.target.value
+                      )
+                    }
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && ussdInput.trim()) {
                         handleUssdOption(ussdInput.trim());

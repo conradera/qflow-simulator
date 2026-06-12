@@ -9,8 +9,8 @@ const geistSans = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "QFlow - Smart Virtual Queue Management System",
-  description: "A smart virtual queue management simulator for Mukono Health Centre IV",
+  title: "QFlow Live - Mukono Health Centre IV",
+  description: "Real-time virtual queue management for Mukono Health Centre IV",
 };
 
 export default function RootLayout({

@@ -12,7 +12,8 @@ export type PatientPriorityDb = 'normal' | 'high' | 'urgent';
 export type PatientStatusDb = 'waiting' | 'serving' | 'completed' | 'no-show';
 export type PatientChannelDb = 'ussd' | 'sms' | 'app' | 'walk-in';
 export type QueueEventTypeDb = 'join' | 'serve' | 'complete' | 'alert';
-export type NotificationTypeDb = 'joined' | 'turn_next' | 'completed';
+export type PatientCareStatusDb = 'normal' | 'attention' | 'emergency';
+export type NotificationTypeDb = 'joined' | 'turn_next' | 'turn_approaching' | 'completed';
 
 export interface ServicePointRow {
   id: string;
@@ -31,10 +32,12 @@ export interface PatientRow {
   id: string;
   name: string;
   phone: string;
+  telephone: string;
   visit_reason: string | null;
   ticket_number: string;
   priority: PatientPriorityDb;
   priority_reason: string | null;
+  care_status: PatientCareStatusDb;
   status: PatientStatusDb;
   service_type: ServiceTypeDb;
   service_point_id: string | null;
