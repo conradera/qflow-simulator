@@ -98,6 +98,17 @@ export default function LiveHeader({
           >
             History
           </Link>
+          <button
+            type="button"
+            onClick={() => {
+              void fetch('/api/auth/logout', { method: 'POST' }).then(() => {
+                window.location.href = '/login';
+              });
+            }}
+            className="text-xs px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 hover:bg-slate-800"
+          >
+            Log out
+          </button>
 
           <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
             <input
