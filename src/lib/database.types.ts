@@ -99,6 +99,7 @@ export interface PatientServiceHistoryRow {
   patient_id: string;
   ticket_number: string;
   patient_name: string | null;
+  telephone: string | null;
   service_type: ServiceTypeDb;
   channel: PatientChannelDb;
   joined_sim_sec: number | null;

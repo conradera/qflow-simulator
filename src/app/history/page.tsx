@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { loadPatientServiceHistory } from "../../lib/queueSupabaseSync";
 import type { PatientServiceHistoryRow } from "../../lib/database.types";
+import { formatUgandaPhoneDisplay } from "../../lib/validation";
 
 function formatDuration(sec: number | null): string {
   if (sec == null) return "-";
@@ -64,6 +65,7 @@ export default function HistoryPage() {
                 <tr className="bg-gray-50 text-left">
                   <th className="px-4 py-2 text-gray-500 font-medium">Ticket #</th>
                   <th className="px-4 py-2 text-gray-500 font-medium">Patient Name</th>
+                  <th className="px-4 py-2 text-gray-500 font-medium">Telephone</th>
                   <th className="px-4 py-2 text-gray-500 font-medium">Service</th>
                   <th className="px-4 py-2 text-gray-500 font-medium">Channel</th>
                   <th className="px-4 py-2 text-gray-500 font-medium">Worked Time</th>
@@ -73,14 +75,14 @@ export default function HistoryPage() {
               <tbody>
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                       No history yet
                     </td>
                   </tr>
                 )}
                 {loading && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                       Loading history...
                     </td>
                   </tr>
@@ -89,6 +91,9 @@ export default function HistoryPage() {
                   <tr key={r.id} className="border-t border-gray-200 hover:bg-gray-50">
                     <td className="px-4 py-2 font-mono text-gray-900">{r.ticket_number}</td>
                     <td className="px-4 py-2 text-gray-700">{r.patient_name || ""}</td>
+                    <td className="px-4 py-2 text-gray-600 font-mono text-xs">
+                      {formatUgandaPhoneDisplay(r.telephone) || "—"}
+                    </td>
                     <td className="px-4 py-2 text-gray-700">{formatService(r.service_type)}</td>
                     <td className="px-4 py-2 text-gray-700 capitalize">{r.channel}</td>
                     <td className="px-4 py-2 text-gray-700">{formatDuration(r.worked_duration_sec)}</td>

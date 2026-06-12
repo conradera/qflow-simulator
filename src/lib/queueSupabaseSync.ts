@@ -237,6 +237,7 @@ export async function insertPatientServiceHistory(patient: Patient): Promise<voi
         patient_id: patient.id,
         ticket_number: patient.ticketNumber,
         patient_name: patient.name?.trim() || null,
+        telephone: normalizeUgandaPhone(patient.telephone ?? patient.phone),
         service_type: patient.serviceType,
         channel: toDbChannel(patient.channel),
         joined_sim_sec: patient.joinedAt ?? null,
