@@ -1,4 +1,4 @@
-# QFlow Simulator
+# QFlow 
 
 **Smart Virtual Queue Management System** for **Mukono Health Centre IV**.
 
